@@ -78,6 +78,11 @@ export default function App() {
         title: videoInfo?.title || 'vidrop-video',
       });
 
+      // Pass direct video URL for Instagram (needed for proxy download)
+      if (videoInfo?.videoUrl) {
+        params.set('videoUrl', videoInfo.videoUrl);
+      }
+
       // Download URL: local uses Express (port 3001), Vercel uses serverless function
       const downloadUrl = `${DOWNLOAD_BASE}/api/download?${params}`;
       
