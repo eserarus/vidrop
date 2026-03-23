@@ -47,21 +47,55 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
     // Determine download options
-    const options = {};
+    const options = {
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        },
+      },
+    };
+
+    // Try multiple clients
+    const clientOptions = [
+      { playerClients: ['IOS'] },
+      { playerClients: ['ANDROID'] },
+      { playerClients: ['WEB_CREATOR'] },
+      {},
+    ];
 
     if (isAudio) {
       options.filter = 'audioonly';
       options.quality = 'highestaudio';
     } else if (format_id && format_id !== 'best' && format_id !== 'audio') {
-      // Try specific itag
       options.quality = parseInt(format_id);
     } else {
       options.filter = 'audioandvideo';
       options.quality = 'highest';
     }
 
-    // Stream the video
-    const stream = ytdl(url, options);
+    let stream;
+    let lastError;
+
+    for (const clientOpt of clientOptions) {
+      try {
+        stream = ytdl(url, { ...options, ...clientOpt });
+        // Test if stream is valid by waiting for 'info' or first data
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Timeout')), 8000);
+          stream.once('response', () => { clearTimeout(timeout); resolve(); });
+          stream.once('error', (err) => { clearTimeout(timeout); reject(err); });
+        });
+        break; // success
+      } catch (e) {
+        lastError = e;
+        console.error(`[download] Client ${JSON.stringify(clientOpt)} failed:`, e.message);
+        if (stream) { stream.destroy(); stream = null; }
+      }
+    }
+
+    if (!stream) {
+      throw lastError || new Error('All download methods failed');
+    }
 
     stream.on('error', (err) => {
       console.error('Stream error:', err.message);

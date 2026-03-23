@@ -21,7 +21,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Detect platform
     const isYouTube = /youtube\.com|youtu\.be/i.test(url);
     const isInstagram = /instagram\.com/i.test(url);
 
@@ -31,19 +30,86 @@ export default async function handler(req, res) {
 
     if (isInstagram) {
       return res.status(400).json({ 
-        error: 'Instagram downloads are only available in the local version. Please use the desktop app.' 
+        error: 'Instagram downloads are only available in the local version.' 
       });
     }
 
-    // YouTube - use ytdl-core
     if (!ytdl.validateURL(url)) {
       return res.status(400).json({ error: 'Invalid YouTube URL.' });
     }
 
-    const info = await ytdl.getInfo(url);
+    // Try multiple approaches to bypass YouTube bot detection on cloud IPs
+    let info;
+    const clientOptions = [
+      { playerClients: ['IOS'] },
+      { playerClients: ['ANDROID'] },
+      { playerClients: ['WEB_CREATOR'] },
+      {},
+    ];
+
+    let lastError;
+    for (const opts of clientOptions) {
+      try {
+        info = await ytdl.getInfo(url, {
+          ...opts,
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          },
+        });
+        break; // success
+      } catch (e) {
+        lastError = e;
+        console.error(`[ytdl] Client ${JSON.stringify(opts)} failed:`, e.message);
+      }
+    }
+
+    if (!info) {
+      // Fallback: try YouTube oEmbed API for basic info (no formats)
+      try {
+        const oembedRes = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
+        );
+        if (oembedRes.ok) {
+          const oembed = await oembedRes.json();
+          
+          // Extract video ID for thumbnail
+          const videoId = ytdl.getVideoID(url);
+          
+          return res.status(200).json({
+            title: oembed.title || 'Untitled',
+            thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+            duration: 0,
+            uploader: oembed.author_name || '',
+            view_count: 0,
+            description: '',
+            platform: 'youtube',
+            formats: [
+              {
+                format_id: 'best',
+                ext: 'mp4',
+                height: 720,
+                width: 1280,
+                fps: 30,
+                filesize: null,
+                quality_label: '720p',
+                hasAudio: true,
+              },
+            ],
+          });
+        }
+      } catch (oembedErr) {
+        console.error('[oEmbed] Fallback failed:', oembedErr.message);
+      }
+
+      throw lastError || new Error('All extraction methods failed');
+    }
+
     const videoDetails = info.videoDetails;
 
-    // Extract video-only formats with height info
+    // Extract video formats with height info
     const videoFormats = info.formats
       .filter(f => f.hasVideo && f.height)
       .map(f => ({
@@ -61,7 +127,7 @@ export default async function handler(req, res) {
       }))
       .sort((a, b) => b.height - a.height);
 
-    // De-duplicate by height (keep best per resolution, prefer formats with audio)
+    // De-duplicate by height (keep best per resolution, prefer with audio)
     const seen = new Set();
     const uniqueFormats = videoFormats.filter(f => {
       const key = f.height;
@@ -70,7 +136,6 @@ export default async function handler(req, res) {
       return true;
     });
 
-    // Get best thumbnail
     const thumbnails = videoDetails.thumbnails || [];
     const bestThumb = thumbnails.length > 0 
       ? thumbnails[thumbnails.length - 1].url 
@@ -88,7 +153,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error('Info error:', err.message);
+    console.error('Info error:', err.message, err.stack);
     return res.status(500).json({ 
       error: 'Could not fetch video information. Please check the URL and try again.' 
     });
