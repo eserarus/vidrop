@@ -91,9 +91,25 @@ export default function App() {
         a.click();
         setTimeout(() => document.body.removeChild(a), 1000);
       } else {
-        // Vercel: use direct CDN URL from info response (no download endpoint needed)
-        const directUrl = selectedFormat.downloadUrl || videoInfo?.bestDownloadUrl || videoInfo?.videoUrl;
+        // Vercel: prefer direct CDN URL from info response
+        let directUrl = selectedFormat.downloadUrl || videoInfo?.bestDownloadUrl || videoInfo?.videoUrl;
         
+        // Fallback: call download API if direct URL not available
+        if (!directUrl) {
+          const params = new URLSearchParams({
+            url,
+            format_id: selectedFormat.format_id,
+            quality: isAudio ? 'audio' : 'video',
+          });
+          if (videoInfo?.videoUrl) params.set('videoUrl', videoInfo.videoUrl);
+          
+          const response = await fetch(`/api/download?${params}`);
+          if (response.ok) {
+            const data = await response.json();
+            directUrl = data.downloadUrl;
+          }
+        }
+
         if (!directUrl) {
           throw new Error(t.errorDownload);
         }
