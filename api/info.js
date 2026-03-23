@@ -166,39 +166,16 @@ export default async function handler(req, res) {
       }))
       .sort((a, b) => b.height - a.height);
 
-    // Also include video-only for higher resolutions not available in combined
-    const videoOnlyFormats = info.formats
-      .filter(f => f.hasVideo && !f.hasAudio && f.url && f.height)
-      .map(f => ({
-        format_id: f.itag.toString(),
-        ext: f.container || 'mp4',
-        height: f.height,
-        width: f.width,
-        fps: f.fps || 30,
-        filesize: f.contentLength ? parseInt(f.contentLength) : null,
-        quality_label: `${f.qualityLabel || `${f.height}p`} (no audio)`,
-        hasAudio: false,
-        downloadUrl: f.url,
-      }))
-      .sort((a, b) => b.height - a.height);
-
-    // Merge: combined first, then video-only for resolutions not in combined
-    const combinedHeights = new Set(combinedFormats.map(f => f.height));
-    const extraVideoOnly = videoOnlyFormats.filter(f => !combinedHeights.has(f.height));
-    
-    const allFormats = [...combinedFormats, ...extraVideoOnly]
-      .sort((a, b) => b.height - a.height);
-
     // De-duplicate by height
     const seen = new Set();
-    const uniqueFormats = allFormats.filter(f => {
+    const uniqueFormats = combinedFormats.filter(f => {
       if (seen.has(f.height)) return false;
       seen.add(f.height);
       return true;
     });
 
-    // Best download URL: prefer combined format
-    const bestUrl = combinedFormats[0]?.downloadUrl || videoOnlyFormats[0]?.downloadUrl || '';
+    // Best download URL
+    const bestUrl = uniqueFormats[0]?.downloadUrl || '';
 
     // Audio URL
     let audioUrl = '';
