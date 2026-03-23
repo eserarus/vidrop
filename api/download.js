@@ -59,29 +59,54 @@ export default async function handler(req, res) {
 
     if (!info) throw lastError || new Error('Could not get video info');
 
-    // Find the right format
-    let chosenFormat;
+    // Find the right format with multiple fallbacks
+    let chosenFormat = null;
 
     if (isAudio) {
-      chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
+      try { chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' }); } catch {}
     } else if (format_id && format_id !== 'best' && format_id !== 'audio') {
-      chosenFormat = info.formats.find(f => f.itag === parseInt(format_id));
+      // Try specific itag first
+      chosenFormat = info.formats.find(f => f.itag === parseInt(format_id) && f.url);
+    }
+
+    // Fallback chain for video
+    if (!chosenFormat && !isAudio) {
+      // 1. Try audioandvideo (combined format)
+      try { chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' }); } catch {}
+      
+      // 2. Try any format with video
       if (!chosenFormat) {
-        chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
+        chosenFormat = info.formats
+          .filter(f => f.hasVideo && f.hasAudio && f.url)
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
       }
-    } else {
-      chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
+
+      // 3. Try video-only as last resort
+      if (!chosenFormat) {
+        chosenFormat = info.formats
+          .filter(f => f.hasVideo && f.url)
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+      }
+    }
+
+    // Last resort: any format with a URL
+    if (!chosenFormat) {
+      chosenFormat = info.formats.find(f => f.url);
     }
 
     if (!chosenFormat || !chosenFormat.url) {
+      console.error('[download] No format found. Available formats:', info.formats.map(f => ({
+        itag: f.itag, hasVideo: f.hasVideo, hasAudio: f.hasAudio, height: f.height, hasUrl: !!f.url
+      })));
       return res.status(500).json({ error: 'No downloadable format found.' });
     }
 
-    // Return the direct URL — frontend will open it
+    console.log(`[download] Chosen format: itag=${chosenFormat.itag}, ${chosenFormat.height}p, hasAudio=${chosenFormat.hasAudio}`);
+
     return res.status(200).json({ downloadUrl: chosenFormat.url });
 
   } catch (err) {
-    console.error('Download error:', err.message);
+    console.error('Download error:', err.message, err.stack);
     return res.status(500).json({ error: 'Download failed. Please try again.' });
   }
 }
