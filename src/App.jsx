@@ -35,12 +35,16 @@ export default function App() {
         body: JSON.stringify({ url: inputUrl }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.error || t.errorGeneric);
+        let errorMsg = t.errorGeneric;
+        try {
+          const errData = await response.json();
+          errorMsg = errData.error || errorMsg;
+        } catch { /* response wasn't JSON */ }
+        throw new Error(errorMsg);
       }
 
+      const data = await response.json();
       setVideoInfo(data);
 
       // Auto-select best quality
