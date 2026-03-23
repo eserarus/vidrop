@@ -8,7 +8,10 @@ import DownloadButton from './components/DownloadButton';
 import Features from './components/Features';
 import Footer from './components/Footer';
 
-const API_BASE = '';
+// Auto-detect: localhost uses Express backend on port 3001, Vercel uses serverless /api/
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE = isLocal ? '' : '';
+const DOWNLOAD_BASE = isLocal ? 'http://localhost:3001' : '';
 
 export default function App() {
   const { t } = useI18n();
@@ -75,8 +78,8 @@ export default function App() {
         title: videoInfo?.title || 'vidrop-video',
       });
 
-      // Direct download via backend (bypass Vite proxy for large files)
-      const downloadUrl = `http://localhost:3001/api/download?${params}`;
+      // Download URL: local uses Express (port 3001), Vercel uses serverless function
+      const downloadUrl = `${DOWNLOAD_BASE}/api/download?${params}`;
       
       // Use a hidden anchor tag for direct download
       const a = document.createElement('a');
