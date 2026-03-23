@@ -4,119 +4,51 @@ import ytdl from '@distube/ytdl-core';
 // Instagram Scraper
 // ========================
 async function getInstagramInfo(url) {
-  // Extract shortcode from URL
   const shortcodeMatch = url.match(/\/(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
-  if (!shortcodeMatch) {
-    throw new Error('Invalid Instagram URL.');
-  }
+  if (!shortcodeMatch) throw new Error('Invalid Instagram URL.');
   const shortcode = shortcodeMatch[2];
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Sec-Fetch-Mode': 'navigate',
   };
 
-  // Method 1: Try the embed endpoint
-  let videoUrl = null;
-  let thumbnail = null;
-  let title = '';
-  let uploader = '';
+  let videoUrl = null, thumbnail = null, title = '', uploader = '';
 
+  // Try embed endpoint
   try {
     const embedRes = await fetch(`https://www.instagram.com/p/${shortcode}/embed/`, { headers });
     if (embedRes.ok) {
       const html = await embedRes.text();
-
-      // Extract video URL from embed HTML
       const videoMatch = html.match(/"video_url"\s*:\s*"([^"]+)"/);
-      if (videoMatch) {
-        videoUrl = videoMatch[1].replace(/\\u0026/g, '&');
-      }
-
-      // Try to find video in other patterns
-      if (!videoUrl) {
-        const srcMatch = html.match(/<video[^>]+src="([^"]+)"/);
-        if (srcMatch) {
-          videoUrl = srcMatch[1].replace(/&amp;/g, '&');
-        }
-      }
-
-      // Extract thumbnail
-      const thumbMatch = html.match(/"display_url"\s*:\s*"([^"]+)"/) ||
-                          html.match(/og:image['"]\s+content=['"](https:\/\/[^'"]+)['"]/);
-      if (thumbMatch) {
-        thumbnail = thumbMatch[1].replace(/\\u0026/g, '&');
-      }
-
-      // Extract caption/title
+      if (videoMatch) videoUrl = videoMatch[1].replace(/\\u0026/g, '&');
+      if (!videoUrl) { const m = html.match(/<video[^>]+src="([^"]+)"/); if (m) videoUrl = m[1].replace(/&amp;/g, '&'); }
+      const thumbMatch = html.match(/"display_url"\s*:\s*"([^"]+)"/);
+      if (thumbMatch) thumbnail = thumbMatch[1].replace(/\\u0026/g, '&');
       const captionMatch = html.match(/"caption"\s*:\s*\{[^}]*"text"\s*:\s*"([^"]{0,200})"/);
-      if (captionMatch) {
-        title = captionMatch[1].replace(/\\n/g, ' ').substring(0, 100);
-      }
-
-      // Extract username
+      if (captionMatch) title = captionMatch[1].replace(/\\n/g, ' ').substring(0, 100);
       const userMatch = html.match(/"username"\s*:\s*"([^"]+)"/);
-      if (userMatch) {
-        uploader = userMatch[1];
-      }
+      if (userMatch) uploader = userMatch[1];
     }
-  } catch (e) {
-    console.error('[Instagram embed] Error:', e.message);
-  }
+  } catch (e) { console.error('[IG embed]', e.message); }
 
-  // Method 2: Try the main page with mobile user agent
+  // Fallback: main page
   if (!videoUrl) {
     try {
-      const pageRes = await fetch(url, {
-        headers,
-        redirect: 'follow',
-      });
+      const pageRes = await fetch(url, { headers, redirect: 'follow' });
       if (pageRes.ok) {
         const html = await pageRes.text();
-
-        // Extract from og:video meta tag
-        const ogVideoMatch = html.match(/<meta\s+property="og:video"\s+content="([^"]+)"/i) ||
-                              html.match(/<meta\s+content="([^"]+)"\s+property="og:video"/i);
-        if (ogVideoMatch) {
-          videoUrl = ogVideoMatch[1].replace(/&amp;/g, '&');
-        }
-
-        // Extract thumbnail from og:image
-        if (!thumbnail) {
-          const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) ||
-                                html.match(/<meta\s+content="([^"]+)"\s+property="og:image"/i);
-          if (ogImageMatch) {
-            thumbnail = ogImageMatch[1].replace(/&amp;/g, '&');
-          }
-        }
-
-        // Extract title from og:title
-        if (!title) {
-          const ogTitleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) ||
-                                html.match(/<meta\s+content="([^"]+)"\s+property="og:title"/i);
-          if (ogTitleMatch) {
-            title = ogTitleMatch[1];
-          }
-        }
-
-        // Try to find video URL in JSON data within script tags
-        if (!videoUrl) {
-          const jsonMatch = html.match(/"video_url"\s*:\s*"([^"]+)"/);
-          if (jsonMatch) {
-            videoUrl = jsonMatch[1].replace(/\\u0026/g, '&');
-          }
-        }
+        const m = html.match(/<meta\s+(?:property="og:video"\s+content="([^"]+)"|content="([^"]+)"\s+property="og:video")/i);
+        if (m) videoUrl = (m[1] || m[2]).replace(/&amp;/g, '&');
+        if (!thumbnail) { const m2 = html.match(/<meta\s+(?:property="og:image"\s+content="([^"]+)"|content="([^"]+)"\s+property="og:image")/i); if (m2) thumbnail = (m2[1] || m2[2]); }
+        if (!title) { const m3 = html.match(/<meta\s+(?:property="og:title"\s+content="([^"]+)"|content="([^"]+)"\s+property="og:title")/i); if (m3) title = m3[1] || m3[2]; }
+        if (!videoUrl) { const m4 = html.match(/"video_url"\s*:\s*"([^"]+)"/); if (m4) videoUrl = m4[1].replace(/\\u0026/g, '&'); }
       }
-    } catch (e) {
-      console.error('[Instagram page] Error:', e.message);
-    }
+    } catch (e) { console.error('[IG page]', e.message); }
   }
 
-  if (!videoUrl) {
-    throw new Error('Could not extract video. The post may be private or not a video.');
-  }
+  if (!videoUrl) throw new Error('Could not extract video. The post may be private or not a video.');
 
   return {
     title: title || `Instagram Reel — @${uploader || 'unknown'}`,
@@ -126,19 +58,13 @@ async function getInstagramInfo(url) {
     view_count: 0,
     description: '',
     platform: 'instagram',
-    videoUrl, // Direct URL for download
-    formats: [
-      {
-        format_id: 'original',
-        ext: 'mp4',
-        height: 1080,
-        width: 1080,
-        fps: 30,
-        filesize: null,
-        quality_label: 'Original',
-        hasAudio: true,
-      },
-    ],
+    videoUrl,
+    bestDownloadUrl: videoUrl,
+    formats: [{
+      format_id: 'original', ext: 'mp4', height: 1080, width: 1080,
+      fps: 30, filesize: null, quality_label: 'Original', hasAudio: true,
+      downloadUrl: videoUrl,
+    }],
   };
 }
 
@@ -164,17 +90,16 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Only YouTube and Instagram are supported.' });
     }
 
-    // ─── Instagram ───
     if (isInstagram) {
       const info = await getInstagramInfo(url);
       return res.status(200).json(info);
     }
 
-    // ─── YouTube ───
     if (!ytdl.validateURL(url)) {
       return res.status(400).json({ error: 'Invalid YouTube URL.' });
     }
 
+    // Try multiple clients
     let info;
     const clientOptions = [
       { playerClients: ['IOS'] },
@@ -198,39 +123,36 @@ export default async function handler(req, res) {
         break;
       } catch (e) {
         lastError = e;
-        console.error(`[ytdl] Client ${JSON.stringify(opts)} failed:`, e.message);
+        console.error(`[ytdl] ${JSON.stringify(opts)} failed:`, e.message);
       }
     }
 
     if (!info) {
-      // Fallback: YouTube oEmbed
+      // Fallback: oEmbed for basic info
       try {
-        const oembedRes = await fetch(
-          `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
-        );
+        const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
         if (oembedRes.ok) {
           const oembed = await oembedRes.json();
           const videoId = ytdl.getVideoID(url);
           return res.status(200).json({
             title: oembed.title || 'Untitled',
             thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-            duration: 0,
-            uploader: oembed.author_name || '',
-            view_count: 0,
-            description: '',
-            platform: 'youtube',
-            formats: [{ format_id: 'best', ext: 'mp4', height: 720, width: 1280, fps: 30, filesize: null, quality_label: '720p', hasAudio: true }],
+            duration: 0, uploader: oembed.author_name || '', view_count: 0,
+            description: '', platform: 'youtube',
+            bestDownloadUrl: '',
+            formats: [{ format_id: 'best', ext: 'mp4', height: 720, width: 1280, fps: 30, filesize: null, quality_label: '720p', hasAudio: true, downloadUrl: '' }],
           });
         }
-      } catch (e) {
-        console.error('[oEmbed] Fallback failed:', e.message);
-      }
+      } catch (e) { console.error('[oEmbed]', e.message); }
       throw lastError || new Error('All extraction methods failed');
     }
 
     const vd = info.videoDetails;
-    const videoFormats = info.formats
-      .filter(f => f.hasVideo && f.height)
+
+    // ── Build format list ──
+    // PRIORITY: formats with BOTH video and audio (can be played directly)
+    const combinedFormats = info.formats
+      .filter(f => f.hasVideo && f.hasAudio && f.url && f.height)
       .map(f => ({
         format_id: f.itag.toString(),
         ext: f.container || 'mp4',
@@ -238,29 +160,57 @@ export default async function handler(req, res) {
         width: f.width,
         fps: f.fps || 30,
         filesize: f.contentLength ? parseInt(f.contentLength) : null,
-        vcodec: f.videoCodec || '',
-        acodec: f.audioCodec || '',
-        hasAudio: f.hasAudio,
         quality_label: f.qualityLabel || `${f.height}p`,
-        downloadUrl: f.url || '',
+        hasAudio: true,
+        downloadUrl: f.url,
       }))
       .sort((a, b) => b.height - a.height);
 
+    // Also include video-only for higher resolutions not available in combined
+    const videoOnlyFormats = info.formats
+      .filter(f => f.hasVideo && !f.hasAudio && f.url && f.height)
+      .map(f => ({
+        format_id: f.itag.toString(),
+        ext: f.container || 'mp4',
+        height: f.height,
+        width: f.width,
+        fps: f.fps || 30,
+        filesize: f.contentLength ? parseInt(f.contentLength) : null,
+        quality_label: `${f.qualityLabel || `${f.height}p`} (no audio)`,
+        hasAudio: false,
+        downloadUrl: f.url,
+      }))
+      .sort((a, b) => b.height - a.height);
+
+    // Merge: combined first, then video-only for resolutions not in combined
+    const combinedHeights = new Set(combinedFormats.map(f => f.height));
+    const extraVideoOnly = videoOnlyFormats.filter(f => !combinedHeights.has(f.height));
+    
+    const allFormats = [...combinedFormats, ...extraVideoOnly]
+      .sort((a, b) => b.height - a.height);
+
+    // De-duplicate by height
     const seen = new Set();
-    const uniqueFormats = videoFormats.filter(f => {
+    const uniqueFormats = allFormats.filter(f => {
       if (seen.has(f.height)) return false;
       seen.add(f.height);
       return true;
     });
 
-    // Find best combined (audio+video) format for one-click download
-    let bestCombined = null;
-    try { bestCombined = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' }); } catch {}
-    if (!bestCombined) {
-      bestCombined = info.formats.find(f => f.hasVideo && f.hasAudio && f.url);
-    }
+    // Best download URL: prefer combined format
+    const bestUrl = combinedFormats[0]?.downloadUrl || videoOnlyFormats[0]?.downloadUrl || '';
+
+    // Audio URL
+    let audioUrl = '';
+    try {
+      const audioFormat = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
+      if (audioFormat?.url) audioUrl = audioFormat.url;
+    } catch {}
 
     const thumbs = vd.thumbnails || [];
+    
+    console.log(`[info] ${vd.title} — ${combinedFormats.length} combined, ${videoOnlyFormats.length} video-only, bestUrl: ${!!bestUrl}`);
+
     return res.status(200).json({
       title: vd.title || 'Untitled',
       thumbnail: thumbs.length > 0 ? thumbs[thumbs.length - 1].url : '',
@@ -270,7 +220,8 @@ export default async function handler(req, res) {
       description: (vd.description || '').substring(0, 200),
       platform: 'youtube',
       formats: uniqueFormats.slice(0, 6),
-      bestDownloadUrl: bestCombined?.url || uniqueFormats[0]?.downloadUrl || '',
+      bestDownloadUrl: bestUrl,
+      audioDownloadUrl: audioUrl,
     });
 
   } catch (err) {

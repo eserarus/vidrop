@@ -92,7 +92,14 @@ export default function App() {
         setTimeout(() => document.body.removeChild(a), 1000);
       } else {
         // Vercel: prefer direct CDN URL from info response
-        let directUrl = selectedFormat.downloadUrl || videoInfo?.bestDownloadUrl || videoInfo?.videoUrl;
+        let directUrl;
+        if (isAudio) {
+          directUrl = videoInfo?.audioDownloadUrl || selectedFormat.downloadUrl;
+        } else {
+          directUrl = selectedFormat.downloadUrl || videoInfo?.bestDownloadUrl;
+        }
+        // Instagram fallback
+        if (!directUrl) directUrl = videoInfo?.videoUrl;
         
         // Fallback: call download API if direct URL not available
         if (!directUrl) {
