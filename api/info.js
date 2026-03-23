@@ -242,6 +242,7 @@ export default async function handler(req, res) {
         acodec: f.audioCodec || '',
         hasAudio: f.hasAudio,
         quality_label: f.qualityLabel || `${f.height}p`,
+        downloadUrl: f.url || '',
       }))
       .sort((a, b) => b.height - a.height);
 
@@ -251,6 +252,13 @@ export default async function handler(req, res) {
       seen.add(f.height);
       return true;
     });
+
+    // Find best combined (audio+video) format for one-click download
+    let bestCombined = null;
+    try { bestCombined = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' }); } catch {}
+    if (!bestCombined) {
+      bestCombined = info.formats.find(f => f.hasVideo && f.hasAudio && f.url);
+    }
 
     const thumbs = vd.thumbnails || [];
     return res.status(200).json({
@@ -262,6 +270,7 @@ export default async function handler(req, res) {
       description: (vd.description || '').substring(0, 200),
       platform: 'youtube',
       formats: uniqueFormats.slice(0, 6),
+      bestDownloadUrl: bestCombined?.url || uniqueFormats[0]?.downloadUrl || '',
     });
 
   } catch (err) {

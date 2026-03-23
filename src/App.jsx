@@ -71,20 +71,17 @@ export default function App() {
 
     try {
       const isAudio = selectedFormat.format_id === 'audio';
-      const params = new URLSearchParams({
-        url,
-        format_id: selectedFormat.format_id,
-        quality: isAudio ? 'audio' : 'video',
-        title: videoInfo?.title || 'vidrop-video',
-      });
-
-      // Pass direct video URL for Instagram
-      if (videoInfo?.videoUrl) {
-        params.set('videoUrl', videoInfo.videoUrl);
-      }
 
       if (isLocal) {
-        // Local: direct download via Express backend
+        // Local: download via Express backend (yt-dlp)
+        const params = new URLSearchParams({
+          url,
+          format_id: selectedFormat.format_id,
+          quality: isAudio ? 'audio' : 'video',
+          title: videoInfo?.title || 'vidrop-video',
+        });
+        if (videoInfo?.videoUrl) params.set('videoUrl', videoInfo.videoUrl);
+
         const downloadUrl = `http://localhost:3001/api/download?${params}`;
         const a = document.createElement('a');
         a.href = downloadUrl;
@@ -94,16 +91,14 @@ export default function App() {
         a.click();
         setTimeout(() => document.body.removeChild(a), 1000);
       } else {
-        // Vercel: fetch direct URL from API, then open it
-        const response = await fetch(`/api/download?${params}`);
-        const data = await response.json();
-
-        if (!response.ok || !data.downloadUrl) {
-          throw new Error(data.error || t.errorDownload);
+        // Vercel: use direct CDN URL from info response (no download endpoint needed)
+        const directUrl = selectedFormat.downloadUrl || videoInfo?.bestDownloadUrl || videoInfo?.videoUrl;
+        
+        if (!directUrl) {
+          throw new Error(t.errorDownload);
         }
 
-        // Open the direct CDN URL — browser will download
-        window.open(data.downloadUrl, '_blank');
+        window.open(directUrl, '_blank');
       }
 
       setTimeout(() => {
