@@ -78,28 +78,34 @@ export default function App() {
         title: videoInfo?.title || 'vidrop-video',
       });
 
-      // Pass direct video URL for Instagram (needed for proxy download)
+      // Pass direct video URL for Instagram
       if (videoInfo?.videoUrl) {
         params.set('videoUrl', videoInfo.videoUrl);
       }
 
-      // Download URL: local uses Express (port 3001), Vercel uses serverless function
-      const downloadUrl = `${DOWNLOAD_BASE}/api/download?${params}`;
-      
-      // Use a hidden anchor tag for direct download
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = '';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      
-      // Clean up after a moment
-      setTimeout(() => {
-        document.body.removeChild(a);
-      }, 1000);
+      if (isLocal) {
+        // Local: direct download via Express backend
+        const downloadUrl = `http://localhost:3001/api/download?${params}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = '';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => document.body.removeChild(a), 1000);
+      } else {
+        // Vercel: fetch direct URL from API, then open it
+        const response = await fetch(`/api/download?${params}`);
+        const data = await response.json();
 
-      // Show success after a brief delay (download starts in background)
+        if (!response.ok || !data.downloadUrl) {
+          throw new Error(data.error || t.errorDownload);
+        }
+
+        // Open the direct CDN URL — browser will download
+        window.open(data.downloadUrl, '_blank');
+      }
+
       setTimeout(() => {
         setSuccess(t.downloadStarted);
         setDownloading(false);

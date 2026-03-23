@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { url, format_id, quality, title, videoUrl: directVideoUrl } = req.query;
+  const { url, format_id, quality, videoUrl: directVideoUrl } = req.query;
 
   if (!url) return res.status(400).json({ error: 'Please provide a URL.' });
 
@@ -15,16 +15,15 @@ export default async function handler(req, res) {
     const isYouTube = /youtube\.com|youtu\.be/i.test(url);
     const isInstagram = /instagram\.com/i.test(url);
 
-    // ─── Instagram: Redirect to direct video URL ───
+    // ─── Instagram ───
     if (isInstagram) {
       if (!directVideoUrl) {
         return res.status(400).json({ error: 'Instagram video URL missing.' });
       }
-      // Redirect browser directly to Instagram CDN — instant, no timeout
-      return res.redirect(302, decodeURIComponent(directVideoUrl));
+      return res.status(200).json({ downloadUrl: decodeURIComponent(directVideoUrl) });
     }
 
-    // ─── YouTube: Get direct URL and redirect ───
+    // ─── YouTube ───
     if (!isYouTube || !ytdl.validateURL(url)) {
       return res.status(400).json({ error: 'Invalid URL.' });
     }
@@ -64,13 +63,10 @@ export default async function handler(req, res) {
     let chosenFormat;
 
     if (isAudio) {
-      // Get best audio-only format
       chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
     } else if (format_id && format_id !== 'best' && format_id !== 'audio') {
-      // Try specific itag
       chosenFormat = info.formats.find(f => f.itag === parseInt(format_id));
       if (!chosenFormat) {
-        // Fallback to best audioandvideo
         chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
       }
     } else {
@@ -81,13 +77,11 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'No downloadable format found.' });
     }
 
-    // Redirect to the direct video URL — instant, no timeout issues
-    return res.redirect(302, chosenFormat.url);
+    // Return the direct URL — frontend will open it
+    return res.status(200).json({ downloadUrl: chosenFormat.url });
 
   } catch (err) {
     console.error('Download error:', err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Download failed. Please try again.' });
-    }
+    return res.status(500).json({ error: 'Download failed. Please try again.' });
   }
 }
