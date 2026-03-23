@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -16,68 +15,21 @@ export default async function handler(req, res) {
     const isYouTube = /youtube\.com|youtu\.be/i.test(url);
     const isInstagram = /instagram\.com/i.test(url);
 
-    // Build filename
-    const isAudio = quality === 'audio';
-    const ext = isAudio ? 'mp3' : 'mp4';
-    let filename = `vidrop-video.${ext}`;
-    if (title) {
-      const safeName = decodeURIComponent(title)
-        .replace(/[^\w\s-]/g, '')
-        .replace(/\s+/g, '_')
-        .substring(0, 80);
-      if (safeName) filename = `${safeName}.${ext}`;
-    }
-
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
-
-    // ─── Instagram Download ───
+    // ─── Instagram: Redirect to direct video URL ───
     if (isInstagram) {
       if (!directVideoUrl) {
         return res.status(400).json({ error: 'Instagram video URL missing.' });
       }
-
-      // Proxy the Instagram video to the client
-      const videoRes = await fetch(decodeURIComponent(directVideoUrl), {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-          'Referer': 'https://www.instagram.com/',
-        },
-      });
-
-      if (!videoRes.ok) {
-        return res.status(500).json({ error: 'Failed to download Instagram video.' });
-      }
-
-      const contentLength = videoRes.headers.get('content-length');
-      if (contentLength) res.setHeader('Content-Length', contentLength);
-
-      // Stream the response body
-      const reader = videoRes.body.getReader();
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(Buffer.from(value));
-        }
-        res.end();
-      };
-      await pump();
-      return;
+      // Redirect browser directly to Instagram CDN — instant, no timeout
+      return res.redirect(302, decodeURIComponent(directVideoUrl));
     }
 
-    // ─── YouTube Download ───
+    // ─── YouTube: Get direct URL and redirect ───
     if (!isYouTube || !ytdl.validateURL(url)) {
       return res.status(400).json({ error: 'Invalid URL.' });
     }
 
-    const options = {
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        },
-      },
-    };
+    const isAudio = quality === 'audio';
 
     const clientOptions = [
       { playerClients: ['IOS'] },
@@ -86,43 +38,51 @@ export default async function handler(req, res) {
       {},
     ];
 
-    if (isAudio) {
-      options.filter = 'audioonly';
-      options.quality = 'highestaudio';
-    } else if (format_id && format_id !== 'best' && format_id !== 'audio') {
-      options.quality = parseInt(format_id);
-    } else {
-      options.filter = 'audioandvideo';
-      options.quality = 'highest';
-    }
-
-    let stream;
+    let info;
     let lastError;
 
-    for (const clientOpt of clientOptions) {
+    for (const opts of clientOptions) {
       try {
-        stream = ytdl(url, { ...options, ...clientOpt });
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Timeout')), 8000);
-          stream.once('response', () => { clearTimeout(timeout); resolve(); });
-          stream.once('error', (err) => { clearTimeout(timeout); reject(err); });
+        info = await ytdl.getInfo(url, {
+          ...opts,
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            },
+          },
         });
         break;
       } catch (e) {
         lastError = e;
-        console.error(`[download] Client ${JSON.stringify(clientOpt)} failed:`, e.message);
-        if (stream) { stream.destroy(); stream = null; }
+        console.error(`[download] Client ${JSON.stringify(opts)} failed:`, e.message);
       }
     }
 
-    if (!stream) throw lastError || new Error('All download methods failed');
+    if (!info) throw lastError || new Error('Could not get video info');
 
-    stream.on('error', (err) => {
-      console.error('Stream error:', err.message);
-      if (!res.headersSent) res.status(500).json({ error: 'Download failed.' });
-    });
+    // Find the right format
+    let chosenFormat;
 
-    stream.pipe(res);
+    if (isAudio) {
+      // Get best audio-only format
+      chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
+    } else if (format_id && format_id !== 'best' && format_id !== 'audio') {
+      // Try specific itag
+      chosenFormat = info.formats.find(f => f.itag === parseInt(format_id));
+      if (!chosenFormat) {
+        // Fallback to best audioandvideo
+        chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
+      }
+    } else {
+      chosenFormat = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
+    }
+
+    if (!chosenFormat || !chosenFormat.url) {
+      return res.status(500).json({ error: 'No downloadable format found.' });
+    }
+
+    // Redirect to the direct video URL — instant, no timeout issues
+    return res.redirect(302, chosenFormat.url);
 
   } catch (err) {
     console.error('Download error:', err.message);
